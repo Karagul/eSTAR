@@ -1,0 +1,7 @@
+#- psql statement to create free-cashflow analysis (suggested by Cen)
+#- Fri Mar 11 17:00:14 EST 2016
+freeCF_YYYY.sql: create free-cashflow list by year/ETFName/Name and (optional) save into TABLE free_cf_yyyy
+freeCF_Y2Avg.sql: convert TABLE free_cf_yyyy into TABLE free_cf (optional)
+OR
+freeCF.sql: create free-cashflow list by [Name]
+freeCF_Sector.sql: add ETFName category based on freeCF.sql and save into free_cf (optional)

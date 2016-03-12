@@ -1,0 +1,87 @@
+#===================================================================================#
+#- Historical stock prices & financials from YAHOO finance (GOOGLE alternative)
+#- Save S&P500 raw data into eSTAR database
+#- Add prc2rtn() function
+#- Last mod. by Ted, Fri Mar 11 10:42:45 EST 2016
+# NOTE: for OLS fitting example
+# fit <- lm(Y ~ X, data=tsx)
+# coef  <- coefficients(fit)       # coefficients
+# resid <- residuals(fit)          # residuals
+# pred  <- predict(fit)            # fitted values
+# rsq   <- summary(fit)$r.squared  # R-sq for the fit
+# se    <- summary(fit)$sigma      # se of the fit
+#===================================================================================#
+library(RPostgreSQL)
+library(dplyr)
+library(xts)
+setwd('/apps/fafa/github/eSTAR/scripts')
+source("_estar_ut.R")
+
+
+prc2rtn <- function(rsx) {
+	xd <- sapply(rsx[,2:ncol(rsx)],function(x) diff(log(x)))
+	tsDate=as.Date(as.character(rsx$pbDate),"%Y%m%d")
+	tsx  <- xts(xd,tsDate[2:length(tsDate)],frequency=365)
+	return(tsx)
+}
+
+#- Run CAPM analysis
+runCAPMAnalysis <- function(mydb,sDate) {
+	if(missing(sDate)) sDate=as.Date(Sys.Date()-366) # past 1-year
+	iniFlg=0
+	xq1Tmp=paste(readLines('tsDataBySector.sql'),collapse=' ')
+	#- Get spdr list Name & corresponding ETFName/Group
+	xq=paste(readLines('Name_ETFName_Sector.sql'),collapse=' ')
+	spdrLst <- dbGetQuery(mydb, xq)
+	etfLst=unique(spdrLst$ETFName)
+	for(etfName in etfLst) {
+		xlLst=filter(spdrLst,spdrLst$ETFName==etfName)
+		xlLst$mean=vector(,nrow(xlLst))
+		xlLst$sd=vector(,nrow(xlLst))
+		xlLst$beta=vector(,nrow(xlLst))
+		xlLst$const=vector(,nrow(xlLst))
+		xlLst$rsq=vector(,nrow(xlLst))
+		xlLst$se=vector(,nrow(xlLst))
+		xlLst$startDate=vector(,nrow(xlLst))
+		xlLst$endDate=vector(,nrow(xlLst))
+		for(jk in 1:nrow(xlLst)) {
+			tickerName=xlLst$Name[jk]
+			xq1=gsub("_xName_",etfName,gsub("_yName_",tickerName,xq1Tmp))
+			xq1=gsub("_pbDate_",as.character(sDate,"%Y%m%d"),xq1)
+			rsx <- dbGetQuery(mydb, xq1)
+			tsx <- prc2rtn(rsx)
+			sYmd=as.character(time(tsx)[1],"%Y%m%d")
+			eYmd=as.character(time(tsx)[nrow(tsx)],"%Y%m%d")
+			fit <- lm(Y ~ X, data=tsx)
+			rsq   <- summary(fit)$r.squared  # R-sq for the fit
+			se    <- summary(fit)$sigma      # se of the fit
+			coef  <- coefficients(fit)
+			xlLst$mean[jk]=mean(tsx$Y)
+			xlLst$sd[jk]=sd(tsx$Y)
+			xlLst$beta[jk]=coef[2]
+			xlLst$const[jk]=coef[1]
+			xlLst$rsq[jk]=rsq
+			xlLst$se[jk]=se
+			xlLst$startDate[jk]=sYmd
+			xlLst$endDate[jk]  =eYmd
+		}
+		iniFlg=data2dbTbl(mydb, 'beta_spdr', xlLst,iniFlg)
+	}
+}
+
+#===================================================================================#
+#-----      MAIN PROGRAM BEGIN      -----#
+
+#---- DB: PostgresSQL
+mydb<-dbConnect(dbDriver("PostgreSQL"),user='sfdbo',password='sfdbo0',host='bbub2',dbname='eSTAR')
+#---- DB: MySQL
+#library(RMySQL)
+#mydb<-dbConnect(MySQL(),user='sfdbo',password='sfdbo0',host='localhost',dbname='eSTAR')
+
+#---- RUN CAPM ANALYSIS
+sDate=as.Date(Sys.Date()-366) # past 1-year
+runCAPMAnalysis(mydb,sDate)
+
+dbDisconnect(mydb)
+#-----      MAIN PROGRAM END      -----#
+#===================================================================================#

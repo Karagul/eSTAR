@@ -1,5 +1,11 @@
-spdr <- read.table("/apps/fafa/github/eSTAR/scripts/holdings_spdr.dat",sep="\t")
-colnames(spdr)=c("Name","ETFName")
 library("RPostgreSQL")
-mydb<-dbConnect(dbDriver("PostgreSQL"),user='sfdbo',password='sfdbo0',host='localhost',dbname='eSTAR')
-dbWriteTable(mydb, "holdings_spdr", spdr, row.names=F, append=F,overwrite=T)
+
+#dbTst <- "holdings_spdr"
+#dbTst <- "description_spdr"
+host <- "localhost"
+dbTst <- "details_spdr"
+fname <- paste("/apps/fafa/github/eSTAR/scripts/",dbTst,".dat",sep="")
+print(fname)
+dbData <- read.csv(fname,header=T,sep="\t")
+mydb<-dbConnect(dbDriver("PostgreSQL"),user='sfdbo',password='sfdbo0',host=host,dbname='eSTAR')
+dbWriteTable(mydb, dbTst, dbData, row.names=F, append=F,overwrite=T)

@@ -1,8 +1,10 @@
+#!/usr/bin/env Rscript
 #===================================================================================#
 #- Historical stock prices & financials from YAHOO finance (GOOGLE alternative)
 #- Save S&P500 raw data into eSTAR database
 #- Last mod. by Ted, Wed Feb 24 16:34:27 EST 2016
 #===================================================================================#
+setwd("/apps/fafa/github/eSTAR/scripts")
 library(quantmod)
 library(qmao)
 require(stringr)
@@ -11,7 +13,7 @@ require(stringr)
 #- Get list of today's quotes using src = "yahoo"
 estarQuote.yahoo <- function(tickerNames,mydb) {
 	dstTbl="prc_quote"
-	tG=50     #- elements per group  
+	tG=100     #- elements per group  
 	tN=length(tickerNames)
 	gN=as.integer(tN/tG)
 	if(gN*tG<tN) gN = gN+1
@@ -29,12 +31,13 @@ estarQuote.yahoo <- function(tickerNames,mydb) {
 		print(tks)
 		if(jg>1) {
 			dbWriteTable(mydb, dstTbl, dbdata, row.names=F, append=T,overwrite=F)
-		#	dbWriteTable(mydb, "prc_quote_hist", dbdata, row.names=F, append=T,overwrite=F)
 		} else {
 			dbWriteTable(mydb, dstTbl, dbdata, row.names=F, append=F,overwrite=T)
 		}
 		print(jg)
 	}
+	rst <- dbGetQuery(mydb, 'DELETE FROM "prc_quote" WHERE "Low" = \'N/A\'')
+	rst <- dbGetQuery(mydb, 'INSERT INTO "prc_quote_hist" SELECT * from "prc_quote"')
 }
 
 #- Get list of today's quotes using src = "google"
@@ -46,7 +49,8 @@ estarQuote.google <- function(tickerNames,mydb) {
 	row.names(dbdata)= (1:length(dbdata$Name))
 	dbWriteTable(mydb, dstTbl, dbdata, row.names=F, append=F,overwrite=T)
 	dstTbl="prc_gquote_hist"
-	#dbWriteTable(mydb, dstTbl, dbdata, row.names=F, append=T,overwrite=F)
+	rst <- dbGetQuery(mydb, 'DELETE FROM "prc_gquote" WHERE "PctChg" IS NULL')
+	dbWriteTable(mydb, dstTbl, dbdata, row.names=F, append=T,overwrite=F)
 }
 
 #===================================================================================#
@@ -70,7 +74,7 @@ mydb<-dbConnect(dbDriver("PostgreSQL"),user='sfdbo',password='sfdbo0',host='loca
 #mydb<-dbConnect(MySQL(),user='sfdbo',password='sfdbo0',host='localhost',dbname='eSTAR')
 
 #---- RUN BATCH JOBS
-#estarQuote.yahoo(tickerNames,mydb)
+estarQuote.yahoo(tickerNames,mydb)
 estarQuote.google(tickerNames_g,mydb)
 
 dbDisconnect(mydb)

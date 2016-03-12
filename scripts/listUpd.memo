@@ -1,0 +1,63 @@
+// NO DATA available, tickers need to drop
+Name	ETFName
+ACE	XLF
+PCL	XLF
+ACE	XLFS
+PCP	XLI
+BRCM	XLK
+GMCR	XLP
+PCL	XLRE
+ALTR	_TBD_
+SELECT *
+FROM "holdings_spdr"
+where
+"Name" NOT LIKE 'XL%' AND
+"Name" NOT IN (
+SELECT "Name" from prc_tmp)
+
+
+// OLD tickers need to drop
+Name	ETFName
+CNX	XLE
+ACE	XLF
+PCL	XLF
+ACE	XLFS
+PCP	XLI
+BRCM	XLK
+GMCR	XLP
+PCL	XLRE
+ALTR	_TBD_
+ATI	_TBD_
+CSC	_TBD_
+FOSL	_TBD_
+GNW	_TBD_
+JOY	_TBD_
+NE	_TBD_
+QEP	_TBD_
+SPY	_TBD_
+
+SELECT *
+FROM "holdings_spdr"
+where
+"Name" NOT LIKE 'XL%' AND
+"Name" NOT IN (
+SELECT "Name" from details_spdr)
+
+// New tickers need to add
+Name	GICS	GICS_Sub
+AWK	Utilities	Water Utilities
+CXO	Energy	Oil & Gas Exploration & Production
+EXR	Financials	Specialized REITs
+FRT	Financials	Retail REITs
+CFG	Financials	Banks
+UDR	Financials	Residential REITs
+
+SELECT *
+FROM details_spdr
+where
+"Name" NOT IN (
+SELECT "Name" from "holdings_spdr")
+
+
+
+

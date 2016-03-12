@@ -1,10 +1,11 @@
 #===================================================================================#
 #- Historical stock prices & financials from YAHOO finance (GOOGLE alternative)
 #- Save S&P500 raw data into eSTAR database
-#- Last mod. by Ted, Wed Feb 24 16:34:27 EST 2016
+#- Last mod. by Ted @ Wed Mar  9 17:57:24 EST 2016
 #===================================================================================#
 library(quantmod)
 require(stringr)
+library(qmao)
 
 #- Clean raw data 
 cleanRawdata <- function(datax,dataxHdr,ticker) {
@@ -22,29 +23,39 @@ cleanRawdata <- function(datax,dataxHdr,ticker) {
 data2dbTbl <- function(dbConn, dstTbl, dbdata,iniFlg) {
 #	query <- paste('DELETE FROM',dstTbl)
 #	rst <- dbGetQuery(mydb, query)
-	print(iniFlg)
-	if(iniFlg>0)
+	if(iniFlg>0) {
 		dbWriteTable(dbConn, dstTbl, dbdata, row.names=F, append=T,overwrite=F)
-	else
+	} else {
 		dbWriteTable(dbConn, dstTbl, dbdata, row.names=F, append=F,overwrite=T)
+		print(sprintf("%s overwrite[%d]",dstTbl,iniFlg))
+	}
 	return(iniFlg+1)
 }
 
 #- Load price history of tickers [tks] from [src] (default:YAHOO)
 #- using insert flag [jx]:[0|1]:[overwrite|append]
-LoadPrcHistory <- function(tks,mydb,jx,src) {
+LoadPrcHistory <- function(tks,mydb,jx,src,dstTbl,fromDt) {
 	tksN=length(tks)
-	if ( !missing(src) && src=="google") {
-		prcHst <- lapply(tks, getSymbols,auto.assign=FALSE,src="google")
-		dstTbl="prc_hist_google"
+	if(missing(dstTbl)) dstTbl="prc_hist"
+	if (!missing(src) && src=="google") {
+		dstTbl= paste(dstTbl,src,sep="_")
 	} else {
-		prcHst <- lapply(tks, getSymbols,auto.assign=FALSE)
-		dstTbl="prc_hist"
+		src="yahoo"
+	}
+	print(tks)
+	if(missing(fromDt)) {
+		prcHst <- lapply( tks,function(x) tryCatch(getSymbols(x,auto.assign=FALSE), error=function(e){NULL}) )
+	} else {
+		print(sprintf("%s %s",src,fromDt))
+		prcHst <- lapply( tks,function(x) tryCatch(getSymbols(x,auto.assign=FALSE,from=fromDt), error=function(e){NULL}) )
 	}
 #	jx=0
 	for(j in 1:tksN) {
-		xstr=sprintf("tks[%d] = %s, jx=%d",j,tks[j],jx)
-		print(xstr)
+		if(is.null(prcHst[[j]])) {
+			print(sprintf("PRICE N/A: tks[%d] = %s, jx=%d",j,tks[j],jx))
+			next
+		}
+		print(sprintf("tks[%d] = %s, jx=%d",j,tks[j],jx))
 		datax=data.frame(prcHst[[j]])
 		dataxHdr=str_replace(colnames(datax),paste(tks[j],".",sep=""),"")
 		datax <- cleanRawdata(datax,dataxHdr,tks[j])
@@ -55,10 +66,11 @@ LoadPrcHistory <- function(tks,mydb,jx,src) {
 
 #- Load dividend history of tickers [tks] 
 #- using insert flag [jx]:[0|1]:[overwrite|append]
-LoadDvndHistory <- function(tks,mydb,jx) {
+LoadDvndHistory <- function(tks,mydb,jx,dstTbl) {
+	if(missing(dstTbl)) dstTbl="dvnd_hist"
 	tksN=length(tks)
 	dvndHst <- lapply(tks, getDividends)
-	dstTbl="dvnd_hist"
+#	dvndHst <- lapply(tks,function(x) tryCatch(getDividends(x), error=function(e){NULL}) )
 #	jx=0
 	for(j in 1:tksN) {
 		if ( length( dvndHst[[j]] )<1 ) 
@@ -70,6 +82,42 @@ LoadDvndHistory <- function(tks,mydb,jx) {
 		jx=data2dbTbl(mydb,dstTbl,datax,jx) 
 	}
 	return(jx);
+}
+
+#- Use view financial object [finHst] of tickers [tks] 
+#- save finacial reports [rpt]:[IS|BS|CF] of frequency [fq]:[Q|A] into mydb:[IS|BS|CF]_[Q|A]_hist
+#- using insert flag [jx]:[0|1]:[overwrite|append]
+LoadRptHistory <- function(rpt,fq,tks,finHst,mydb,jx) {
+	epsM=lapply(finHst, function(x) if(is.null(x)==F) viewFin(x,rpt,fq)[,] )
+	MQ=NULL
+	tksN=length(tks)
+	js=-1
+	for(j in 1:tksN) {
+		if(is.null(epsM[[j]])==T)
+			next
+		else if(js==-1)
+			js=j
+		ticker=tks[j]
+		eps=t(epsM[[j]])
+		m=data.frame(ticker,eps)
+		xfd=gsub("[,-.\\()/ &]","",colnames(m))
+		colnames(m)<-xfd
+		if(j==js)
+			MQ=m
+		else
+			MQ=rbind(MQ,m)
+		print(m)
+	}
+	if(is.null(MQ)==T)
+		return(jx)
+	print(MQ)
+	ymd=as.integer(as.character(as.Date(row.names(MQ),"%Y-%m-%d"),"%Y%m%d"))
+	MQ$pbDate=ymd
+	if(jx>0)
+		dbWriteTable(mydb, paste(rpt,fq,"hist",sep="_"), MQ, row.names=F, append=T,overwrite=F)
+	else
+		dbWriteTable(mydb, paste(rpt,fq,"hist",sep="_"), MQ, row.names=F, append=F,overwrite=T)
+	return(jx+length(tks))
 }
 
 #- Use view financial object [finHst] of tickers [tks] 
@@ -146,7 +194,6 @@ LoadHistoryBatch <- function(tickerNames,mydb) {
 #- ja, jb to control DB insert flag from the beginning
 LoadFinBatch <- function(tickerNames,mydb) {
 	#- Reference ONLY
-	#date.be <- c("2000-01-01", "2015-01-01")
 	#lapply(finHst, function(x) x$IS$A["Operating Income", ] / x$IS$A["Total Revenue",])
 	#lapply(finHst, function(x) x$IS$Q["Diluted Normalized EPS", ])
 	#lapply(finHst, function(x) x$IS$Q["Dividends per Share - Common Stock Primary Issue", ])
@@ -172,37 +219,44 @@ LoadFinBatch <- function(tickerNames,mydb) {
 	}
 }
 
-#===================================================================================#
-#-----      MAIN PROGRAM BEGIN      -----#
+#- Batch job of price quote
+#- Get list of today's quotes using src = "yahoo"
+estarQuote.yahoo <- function(tickerNames,mydb) {
+	dstTbl="prc_quote"
+	tG=50     #- elements per group  
+	tN=length(tickerNames)
+	gN=as.integer(tN/tG)
+	if(gN*tG<tN) gN = gN+1
+	for(jg in 1:gN) {
+		gB=(jg-1)*tG+1
+		if(jg==gN)
+                        gE = tN
+                else
+                        gE = gB+tG-1
+		tks=tickerNames[gB:gE]
+		dbdata=getQuote(paste(tks,collapse = ";"))
+		colnames(dbdata)=c('TradeTime','Last','Change','PctChg','Open','High','Low','Volume')
+		dbdata$Name=row.names(dbdata)
+		row.names(dbdata)= (1:length(dbdata$Last))
+		print(tks)
+		if(jg>1) {
+			dbWriteTable(mydb, dstTbl, dbdata, row.names=F, append=T,overwrite=F)
+		#	dbWriteTable(mydb, "prc_quote_hist", dbdata, row.names=F, append=T,overwrite=F)
+		} else {
+			dbWriteTable(mydb, dstTbl, dbdata, row.names=F, append=F,overwrite=T)
+		}
+		print(jg)
+	}
+}
 
-#----- SET OPTIONS
-options(download.file.method="wget")
-options("getSymbols.warning4.0"=FALSE)
-
-#----- SET TICKERS
-tickerNames <- readLines("spyLst.dat")
-#tickerNames = tickerNames[513:524] # TEMP INSERT TEST
-#tickerNames = tickerNames[1:512]  # TEMP INSERT TEST
-#tickerNames <- c("AAPL","GOOG","AMZN","MSFT","IBM","INTC","GRMN","NFLX","UTX","VZ","GE","JPM","GS","NKE","LB","CMG","PNRA","KO","PG","DIS","JNJ","MRK","PFE","XOM","GWW","UHAL","TSM","SPY","XLK","NKE")
-
-#----- QUICK TEST ONLY ----#
-# prcHst <- lapply(tks, getSymbols, auto.assign=FALSE,src="google")
-# head(prcHst[[1]])
-# dvndHst <- lapply(tks, getDividends,src="google")
-# tail(dvndHst[[1]])
-#--------------------------#
-
-#---- DB: PostgresSQL
-library("RPostgreSQL")
-mydb<-dbConnect(dbDriver("PostgreSQL"),user='sfdbo',password='sfdbo0',host='localhost',dbname='eSTAR')
-#---- DB: MySQL
-#library(RMySQL)
-#mydb<-dbConnect(MySQL(),user='sfdbo',password='sfdbo0',host='localhost',dbname='eSTAR')
-
-#---- RUN BATCH JOBS
-LoadHistoryBatch(tickerNames,mydb)
-LoadFinBatch(tickerNames,mydb)
-
-dbDisconnect(mydb)
-#-----      MAIN PROGRAM END      -----#
-#===================================================================================#
+#- Get list of today's quotes using src = "google"
+estarQuote.google <- function(tickerNames,mydb) {
+	dstTbl="prc_gquote"
+	dbdata=getQuote.google(tickerNames)
+	colnames(dbdata)=c('TradeTime','Last','Change','PctChg','Exchange','GoogleID')
+	dbdata$Name=row.names(dbdata)
+	row.names(dbdata)= (1:length(dbdata$Name))
+	dbWriteTable(mydb, dstTbl, dbdata, row.names=F, append=F,overwrite=T)
+	dstTbl="prc_gquote_hist"
+	#dbWriteTable(mydb, dstTbl, dbdata, row.names=F, append=T,overwrite=F)
+}
